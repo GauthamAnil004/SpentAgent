@@ -230,11 +230,11 @@
             </div>
             
             <div class="tabs">
-                <button class="tab-btn" onclick="switchTab('ledger-add', event)">➕ Add Entry</button>
-                <button class="tab-btn active" onclick="switchTab('ledger-view', event); loadLedgerRecords(); loadLedgerRecords()">📋 View Records</button>
+                <button class="tab-btn active" onclick="switchTab('ledger-add', event)">➕ Add Entry</button>
+                <button class="tab-btn" onclick="switchTab('ledger-view', event); loadLedgerRecords(); loadLedgerRecords()">📋 View Records</button>
             </div>
             
-            <div id="ledger-add" class="tab-content hidden">
+            <div id="ledger-add" class="tab-content active">
                 <div class="form-card">
                     <div class="form-group">
                         <label>Friend Name</label>
@@ -267,7 +267,7 @@
                 </div>
             </div>
             
-            <div id="ledger-view" class="tab-content active">
+            <div id="ledger-view" class="tab-content hidden">
                 <div class="summary-bar split">
                     <div>Total Owed to You: <span id="total-lent" class="success-text">$0.00</span></div>
                     <div>Total You Owe: <span id="total-borrowed" class="error-text">$0.00</span></div>
