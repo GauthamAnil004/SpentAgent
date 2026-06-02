@@ -572,7 +572,7 @@ async function addLedgerEntry() {
             document.getElementById('ledger-name').value = ''; document.getElementById('ledger-amount').value = ''; document.getElementById('ledger-desc').value = ''; document.getElementById('ledger-view').classList.remove('hidden'); document.getElementById('ledger-view').classList.add('active'); document.getElementById('ledger-add').classList.remove('active'); loadLedgerRecords();
             document.getElementById('ledger-amount').value = '';
             document.getElementById('ledger-desc').value = '';
-            document.getElementById('ledger-view') && document.getElementById('ledger-view').classList.remove('hidden'); document.getElementById('ledger-add') && document.getElementById('ledger-add').classList.add('hidden');
+
             loadLedgerRecords();
         } else {
             showError(data.detail || 'Failed to add entry.');
