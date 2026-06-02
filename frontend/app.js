@@ -1,4 +1,4 @@
-﻿const API_BASE = 'http://127.0.0.1:8000/api';
+﻿const API_BASE = 'https://spentagent-api.onrender.com/api';
 let currentTransactionId = null;
 
 // File Upload State
@@ -485,7 +485,7 @@ async function loadLedgerRecords() {
     container.innerHTML = '<p style="color:#888;">Loading...</p>';
 
     try {
-        const response = await fetch('http://127.0.0.1:8000/api/ledger/records');
+        const response = await fetch('https://spentagent-api.onrender.com/api/ledger/records');
         const data = await response.json();
         const records = data.records || [];
 
@@ -529,12 +529,12 @@ async function loadLedgerRecords() {
 }
 
 async function settleLedger(id) {
-    await fetch('http://127.0.0.1:8000/api/ledger/settle/' + id, { method: 'PATCH' });
+    await fetch('https://spentagent-api.onrender.com/api/ledger/settle/' + id, { method: 'PATCH' });
     loadLedgerRecords();
 }
 
 async function deleteLedger(id) {
-    await fetch('http://127.0.0.1:8000/api/ledger/delete/' + id, { method: 'DELETE' });
+    await fetch('https://spentagent-api.onrender.com/api/ledger/delete/' + id, { method: 'DELETE' });
     loadLedgerRecords();
 }
 
@@ -555,7 +555,7 @@ async function addLedgerEntry() {
     }
 
     try {
-        const response = await fetch('http://127.0.0.1:8000/api/ledger/add', {
+        const response = await fetch('https://spentagent-api.onrender.com/api/ledger/add', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
