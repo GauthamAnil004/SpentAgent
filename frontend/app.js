@@ -1,4 +1,4 @@
-﻿const API_BASE = 'https://spentagent-api.onrender.com/api';
+const API_BASE = 'https://spentagent-api.onrender.com/api';
 let currentTransactionId = null;
 
 // File Upload State
@@ -590,7 +590,7 @@ function showLedgerRecords() {
     btns.forEach(function(b){ b.classList.remove('active'); });
     var viewBtn = document.querySelector('#screen-ledger .tab-btn:last-child');
     if(viewBtn) viewBtn.classList.add('active');
-    if(addTab){ addTab.classList.add('hidden'); addTab.classList.remove('active'); }
+    if(addTab){ addTab.classList.remove('active'); }
     if(viewTab){ viewTab.classList.remove('hidden'); viewTab.classList.add('active'); }
     loadLedgerRecords();
 }
