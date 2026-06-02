@@ -50,8 +50,8 @@ function navigate(screenId) {
     var viewTab = document.getElementById('ledger-view');
     var allTabBtns = document.querySelectorAll('#screen-ledger .tab-btn');
     allTabBtns.forEach(function(b){b.classList.remove('active');});
-    if(addTab){addTab.classList.remove('active');addTab.classList.add('hidden');}
-    if(viewTab){viewTab.classList.remove('hidden');viewTab.classList.add('active');}
+    if(addTab){addTab.classList.remove('hidden');addTab.classList.add('active');}
+    if(viewTab){viewTab.classList.add('hidden');viewTab.classList.remove('active');}
     loadLedgerRecords();
 }
     
