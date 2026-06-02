@@ -923,3 +923,13 @@ blockquote {
     gap: 0.5rem;
     align-items: center;
 }
+
+select option {
+    background-color: #1a2035;
+    color: #ffffff;
+}
+
+select {
+    background-color: #1a2035;
+    color: #ffffff;
+}
