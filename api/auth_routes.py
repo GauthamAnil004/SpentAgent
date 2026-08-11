@@ -42,6 +42,8 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 def get_password_hash(password):
+    if len(password.encode('utf-8')) > 72:
+        raise ValueError("Password too long")
     return pwd_context.hash(password)
 
 def verify_password(plain_password, hashed_password):
@@ -66,6 +68,9 @@ def register(req: RegisterRequest):
         conn.close()
         raise HTTPException(status_code=400, detail="Email already registered")
     
+    if len(req.password.encode('utf-8')) > 72:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Password must be 72 characters or less")
     hashed_password = get_password_hash(req.password)
     cursor.execute(
         "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)",

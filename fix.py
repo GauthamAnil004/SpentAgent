@@ -1,31 +1,26 @@
-css = open('frontend/styles.css', 'r', encoding='utf-8').read()
+content = open('api/auth_routes.py', 'r', encoding='utf-8').read()
 
-mobile_css = """
-@media (max-width: 600px) {
-    nav {
-        overflow-x: auto;
-        flex-wrap: nowrap;
-        justify-content: flex-start;
-        padding: 8px 12px;
-        gap: 8px;
-    }
-    .nav-btn {
-        white-space: nowrap;
-        font-size: 12px;
-        padding: 6px 12px;
-    }
-    .hero-section h1 {
-        font-size: 28px;
-    }
-    .screen {
-        padding: 16px 12px;
-    }
-    .result-card, .form-card {
-        padding: 16px;
-    }
-}
-"""
+old = '''def get_password_hash(password):
+    return pwd_context.hash(password)'''
 
-css += mobile_css
-open('frontend/styles.css', 'w', encoding='utf-8').write(css)
+new = '''def get_password_hash(password):
+    if len(password.encode('utf-8')) > 72:
+        raise ValueError("Password too long")
+    return pwd_context.hash(password)'''
+
+content = content.replace(old, new)
+
+old2 = '''    hashed_password = get_password_hash(req.password)
+    cursor.execute(
+        "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)",'''
+
+new2 = '''    if len(req.password.encode('utf-8')) > 72:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Password must be 72 characters or less")
+    hashed_password = get_password_hash(req.password)
+    cursor.execute(
+        "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)",'''
+
+content = content.replace(old2, new2)
+open('api/auth_routes.py', 'w', encoding='utf-8').write(content)
 print('Done')
