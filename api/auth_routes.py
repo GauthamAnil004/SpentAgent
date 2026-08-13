@@ -42,14 +42,15 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 def get_password_hash(password: str) -> str:
-    import hashlib
+    import hashlib, bcrypt
     password_hash = hashlib.sha256(password.encode()).hexdigest()
-    return pwd_context.hash(password_hash)
+    hashed = bcrypt.hashpw(password_hash.encode(), bcrypt.gensalt())
+    return hashed.decode()
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    import hashlib
+    import hashlib, bcrypt
     password_hash = hashlib.sha256(plain_password.encode()).hexdigest()
-    return pwd_context.verify(password_hash, hashed_password)
+    return bcrypt.checkpw(password_hash.encode(), hashed_password.encode())
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
