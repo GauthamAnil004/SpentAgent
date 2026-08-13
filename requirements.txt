@@ -16,6 +16,7 @@ langchain-text-splitters
 groq
 python-jose[cryptography]
 passlib[bcrypt]
+bcrypt>=4.1.0
 aiosmtplib
 email-validator
 aiosqlite
