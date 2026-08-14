@@ -7,19 +7,15 @@ import traceback
 from datetime import datetime, timedelta, timezone
 import random
 import string
-import aiosmtplib
-from email.message import EmailMessage
 from db.database import get_connection
 
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 router = APIRouter(tags=["auth"])
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "spendagent_jwt_2026_xK9mP3qR7vL")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 24 * 60
-
-GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS")
-GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 
 class RegisterRequest(BaseModel):
     name: str
@@ -101,23 +97,27 @@ def login(req: LoginRequest):
         raise HTTPException(status_code=500, detail=f"{str(e)} | {traceback.format_exc()}")
 
 async def send_otp_email(email: str, otp: str):
-    if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
-        print("Warning: SMTP credentials not set. OTP:", otp)
+    if not RESEND_API_KEY:
+        print("Warning: RESEND_API_KEY not set. OTP:", otp)
         return
-    message = EmailMessage()
-    message["From"] = GMAIL_ADDRESS
-    message["To"] = email
-    message["Subject"] = "SpendAgent - Your OTP Code"
-    message.set_content(f"Your OTP is: {otp}. Valid for 10 minutes.")
+    import httpx
     try:
-        await aiosmtplib.send(
-            message,
-            hostname="smtp.gmail.com",
-            port=465,
-            use_tls=True,
-            username=GMAIL_ADDRESS,
-            password=GMAIL_APP_PASSWORD,
-        )
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {RESEND_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": "SpendAgent <onboarding@resend.dev>",
+                    "to": [email],
+                    "subject": "SpendAgent - Your OTP Code",
+                    "text": f"Your OTP is: {otp}. Valid for 10 minutes.",
+                },
+            )
+            if response.status_code >= 400:
+                print(f"Failed to send email: {response.status_code} {response.text}")
     except Exception as e:
         print(f"Failed to send email: {e}")
 
