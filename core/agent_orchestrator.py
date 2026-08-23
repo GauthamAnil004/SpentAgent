@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 # Groq for compliance reasoning — fast, free, no daily cap
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="openai/gpt-oss-120b",
     temperature=0.1
 )
 
