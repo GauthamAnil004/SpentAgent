@@ -1,0 +1,85 @@
+name: Backend Load Test & Vulnerability Scan
+
+# Two independent backend quality checks for the SpendAgent FastAPI service:
+#
+#   load-test          - a light k6 smoke load (5 VUs / 30s) against the
+#                         live Render-hosted API's read-only endpoints.
+#   vulnerability-scan  - static analysis only, no traffic to the live
+#                         backend: bandit for code-level issues, pip-audit
+#                         for known CVEs in requirements.txt. Each first
+#                         writes a full informational report as an
+#                         artifact, then re-runs as a hard gate that fails
+#                         the job on medium/high-severity bandit findings
+#                         or any known dependency vulnerability.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/**'
+      - 'core/**'
+      - 'db/**'
+      - 'main.py'
+      - 'fix.py'
+      - 'requirements.txt'
+      - 'load-tests/**'
+      - '.github/workflows/backend-checks.yml'
+  workflow_dispatch:
+
+jobs:
+  load-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run k6 smoke load test
+        uses: grafana/k6-action@v0.3.1
+        with:
+          filename: load-tests/smoke-test.js
+        env:
+          BASE_URL: https://spentagent-api.onrender.com
+
+  vulnerability-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install scanners
+        run: pip install bandit pip-audit
+
+      - name: Bandit - full report (informational)
+        run: bandit -r api core db main.py fix.py -f txt -o bandit-report.txt
+        continue-on-error: true
+
+      - name: Upload Bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.txt
+          if-no-files-found: ignore
+
+      - name: Bandit - fail on medium/high severity findings
+        run: bandit -r api core db main.py fix.py -ll
+
+      - name: pip-audit - full report (informational)
+        run: pip-audit -r requirements.txt -f json -o pip-audit-report.json
+        continue-on-error: true
+
+      - name: Upload pip-audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.json
+          if-no-files-found: ignore
+
+      - name: pip-audit - fail on known dependency vulnerabilities
+        run: pip-audit -r requirements.txt
