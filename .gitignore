@@ -10,3 +10,8 @@ chroma_db/
 *.pyc
 spendagent.db
 *.db
+
+# Selenium E2E test tooling
+selenium-tests/node_modules/
+selenium-tests/mochawesome-report/
+selenium-tests/package-lock.json
