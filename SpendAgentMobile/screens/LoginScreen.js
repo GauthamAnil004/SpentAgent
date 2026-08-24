@@ -46,6 +46,7 @@ export default function LoginScreen({ navigation, onLoggedIn }) {
         <ScreenTitle title="Welcome Back" subtitle="Login to your SpendAgent account" />
         
         <Input
+          testID="email-input"
           placeholder="Email address"
           value={email}
           onChangeText={setEmail}
@@ -53,22 +54,24 @@ export default function LoginScreen({ navigation, onLoggedIn }) {
           keyboardType="email-address"
           autoComplete="email"
         />
-        
+
         <Input
+          testID="password-input"
           placeholder="Password"
           value={password}
           onChangeText={setPassword}
           secureTextEntry
           autoComplete="password"
         />
-        
+
         <ErrorText error={error} />
-        
-        <Button 
-          title="Login" 
-          onPress={handleLogin} 
-          loading={loading} 
-          style={styles.loginButton} 
+
+        <Button
+          testID="login-button"
+          title="Login"
+          onPress={handleLogin}
+          loading={loading}
+          style={styles.loginButton}
         />
         
         <View style={styles.linksContainer}>
