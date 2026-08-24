@@ -59,16 +59,18 @@ def register(req: RegisterRequest):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM users WHERE email = ?", (req.email,))
+        cursor.execute("SELECT id FROM users WHERE email = %s", (req.email,))
         if cursor.fetchone():
+            cursor.close()
             conn.close()
             raise HTTPException(status_code=400, detail="Email already registered")
         hashed_password = get_password_hash(req.password)
         cursor.execute(
-            "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)",
+            "INSERT INTO users (name, email, password_hash) VALUES (%s, %s, %s)",
             (req.name, req.email, hashed_password)
         )
         conn.commit()
+        cursor.close()
         conn.close()
         return {"message": "Account created successfully"}
     except HTTPException:
@@ -81,8 +83,9 @@ def login(req: LoginRequest):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT name, email, password_hash FROM users WHERE email = ?", (req.email,))
+        cursor.execute("SELECT name, email, password_hash FROM users WHERE email = %s", (req.email,))
         user = cursor.fetchone()
+        cursor.close()
         conn.close()
         if not user or not verify_password(req.password, user["password_hash"]):
             raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -125,17 +128,19 @@ async def send_otp_email(email: str, otp: str):
 async def forgot_password(req: ForgotPasswordRequest):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id FROM users WHERE email = ?", (req.email,))
+    cursor.execute("SELECT id FROM users WHERE email = %s", (req.email,))
     if not cursor.fetchone():
+        cursor.close()
         conn.close()
         raise HTTPException(status_code=404, detail="User not found")
     otp = "".join(random.choices(string.digits, k=6))
     expiry = datetime.now() + timedelta(minutes=10)
     cursor.execute(
-        "INSERT INTO otps (email, otp_code, expiry) VALUES (?, ?, ?)",
-        (req.email, otp, expiry.strftime("%Y-%m-%d %H:%M:%S"))
+        "INSERT INTO otps (email, otp_code, expiry) VALUES (%s, %s, %s)",
+        (req.email, otp, expiry)
     )
     conn.commit()
+    cursor.close()
     conn.close()
     await send_otp_email(req.email, otp)
     return {"message": "OTP sent to your email"}
@@ -145,19 +150,30 @@ def verify_otp(req: VerifyOtpRequest):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT id, expiry FROM otps WHERE email = ? AND otp_code = ? AND used = 0 ORDER BY created_at DESC LIMIT 1",
+        "SELECT id, expiry FROM otps WHERE email = %s AND otp_code = %s AND used = 0 ORDER BY created_at DESC LIMIT 1",
         (req.email, req.otp)
     )
     otp_record = cursor.fetchone()
     if not otp_record:
+        cursor.close()
         conn.close()
         raise HTTPException(status_code=400, detail="Invalid OTP")
-    expiry_time = datetime.strptime(otp_record["expiry"], "%Y-%m-%d %H:%M:%S")
-    if datetime.now() > expiry_time:
+    
+    expiry_val = otp_record["expiry"]
+    if isinstance(expiry_val, str):
+        expiry_time = datetime.strptime(expiry_val, "%Y-%m-%d %H:%M:%S")
+    else:
+        expiry_time = expiry_val
+
+    current_time = datetime.now(expiry_time.tzinfo) if getattr(expiry_time, "tzinfo", None) else datetime.now()
+    if current_time > expiry_time:
+        cursor.close()
         conn.close()
         raise HTTPException(status_code=400, detail="OTP expired")
-    cursor.execute("UPDATE otps SET used = 1 WHERE id = ?", (otp_record["id"],))
+    
+    cursor.execute("UPDATE otps SET used = 1 WHERE id = %s", (otp_record["id"],))
     conn.commit()
+    cursor.close()
     conn.close()
     reset_token = create_access_token(
         data={"sub": req.email, "type": "reset"}, expires_delta=timedelta(minutes=15)
@@ -177,7 +193,8 @@ def reset_password(req: ResetPasswordRequest):
     hashed_password = get_password_hash(req.new_password)
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE users SET password_hash = ? WHERE email = ?", (hashed_password, email))
+    cursor.execute("UPDATE users SET password_hash = %s WHERE email = %s", (hashed_password, email))
     conn.commit()
+    cursor.close()
     conn.close()
     return {"message": "Password reset successfully"}
