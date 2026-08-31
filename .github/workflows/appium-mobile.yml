@@ -1,0 +1,87 @@
+name: Appium Mobile Smoke Test
+
+# Basic Appium smoke test for the SpendAgentMobile (Expo/React Native)
+# app: builds a debug APK, boots an Android emulator, and verifies the
+# login screen renders with its expected automation ids (email-input,
+# password-input, login-button). This is heavier and slower than the web
+# Selenium suite and more prone to environment flakiness (emulator boot,
+# Expo prebuild, Gradle build times), so its scope is kept intentionally
+# minimal - it proves the app launches and the login screen is reachable,
+# not full login coverage.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'SpendAgentMobile/**'
+      - 'mobile-tests/**'
+      - '.github/workflows/appium-mobile.yml'
+  workflow_dispatch:
+
+jobs:
+  appium-smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable KVM for the Android emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install mobile app dependencies
+        working-directory: SpendAgentMobile
+        run: npm install
+
+      - name: Prebuild native Android project
+        working-directory: SpendAgentMobile
+        run: npx expo prebuild --platform android --non-interactive
+
+      - name: Build debug APK
+        working-directory: SpendAgentMobile/android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Install Appium and the UiAutomator2 driver
+        run: |
+          npm install -g appium
+          appium driver install uiautomator2
+
+      - name: Install Appium test dependencies
+        working-directory: mobile-tests
+        run: npm install
+
+      - name: Run Appium smoke test on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            appium --base-path / --log-timestamp &
+            APPIUM_PID=$!
+            sleep 8
+            APK_PATH="$GITHUB_WORKSPACE/SpendAgentMobile/android/app/build/outputs/apk/debug/app-debug.apk" \
+            APP_PACKAGE="com.spendagent.mobile" \
+              node mobile-tests/test/login-screen.test.js
+            TEST_EXIT=$?
+            kill $APPIUM_PID
+            exit $TEST_EXIT
