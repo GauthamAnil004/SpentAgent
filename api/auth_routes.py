@@ -100,16 +100,19 @@ def login(req: LoginRequest):
         raise HTTPException(status_code=500, detail=f"{str(e)} | {traceback.format_exc()}")
 
 async def send_otp_email(email: str, otp: str):
-    if not RESEND_API_KEY:
+    api_key = os.getenv("RESEND_API_KEY") or RESEND_API_KEY
+    print(f"DEBUG: RESEND_API_KEY is set: {bool(api_key)}, length: {len(api_key) if api_key else 0}")
+    if not api_key:
         print("Warning: RESEND_API_KEY not set. OTP:", otp)
         return
     import httpx
     try:
+        print(f"DEBUG: Attempting to send email to {email} via Resend")
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 "https://api.resend.com/emails",
                 headers={
-                    "Authorization": f"Bearer {RESEND_API_KEY}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
@@ -119,10 +122,11 @@ async def send_otp_email(email: str, otp: str):
                     "text": f"Your OTP is: {otp}. Valid for 10 minutes.",
                 },
             )
+            print(f"DEBUG: Resend response status: {response.status_code}, body: {response.text}")
             if response.status_code >= 400:
                 print(f"Failed to send email: {response.status_code} {response.text}")
     except Exception as e:
-        print(f"Failed to send email: {e}")
+        print(f"Failed to send email: {e} | {traceback.format_exc()}")
 
 @router.post("/auth/forgot-password")
 async def forgot_password(req: ForgotPasswordRequest):
