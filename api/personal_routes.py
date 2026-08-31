@@ -1,21 +1,22 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 from db.database import get_connection
 from core.agent_orchestrator import llm
 from langchain_core.messages import HumanMessage, SystemMessage
+from api.auth_routes import get_current_user_id
 
 router = APIRouter()
 
 # ─── Personal Finance Tracker ───────────────────────────────────
 
 @router.post("/personal/add-expense")
-async def add_expense(data: dict):
+async def add_expense(data: dict, user_id: int = Depends(get_current_user_id)):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO personal_expenses (amount, category, description, date)
-        VALUES (%s, %s, %s, %s)
+        INSERT INTO personal_expenses (user_id, amount, category, description, date)
+        VALUES (%s, %s, %s, %s, %s)
         RETURNING id
-    """, (data["amount"], data["category"], data.get("description", ""), data["date"]))
+    """, (user_id, data["amount"], data["category"], data.get("description", ""), data["date"]))
     inserted = cursor.fetchone()
     expense_id = inserted["id"] if inserted else None
     conn.commit()
@@ -24,30 +25,33 @@ async def add_expense(data: dict):
     return {"id": expense_id, "message": "Expense added successfully."}
 
 @router.get("/personal/expenses")
-async def get_expenses():
+async def get_expenses(user_id: int = Depends(get_current_user_id)):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM personal_expenses ORDER BY date DESC")
+    cursor.execute("SELECT * FROM personal_expenses WHERE user_id = %s ORDER BY date DESC", (user_id,))
     rows = cursor.fetchall()
     cursor.close()
     conn.close()
     return {"expenses": [dict(row) for row in rows]}
 
 @router.delete("/personal/expense/{expense_id}")
-async def delete_expense(expense_id: int):
+async def delete_expense(expense_id: int, user_id: int = Depends(get_current_user_id)):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM personal_expenses WHERE id = %s", (expense_id,))
+    cursor.execute("DELETE FROM personal_expenses WHERE id = %s AND user_id = %s RETURNING id", (expense_id, user_id))
+    deleted = cursor.fetchone()
     conn.commit()
     cursor.close()
     conn.close()
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Expense not found or unauthorized")
     return {"message": "Expense deleted."}
 
 @router.get("/personal/analyze")
-async def analyze_expenses():
+async def analyze_expenses(user_id: int = Depends(get_current_user_id)):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM personal_expenses ORDER BY date DESC")
+    cursor.execute("SELECT * FROM personal_expenses WHERE user_id = %s ORDER BY date DESC", (user_id,))
     rows = cursor.fetchall()
     cursor.close()
     conn.close()
@@ -70,14 +74,15 @@ async def analyze_expenses():
 # ─── Friend Ledger ─────────────────────────────────────────────
 
 @router.post("/ledger/add")
-async def add_ledger_entry(data: dict):
+async def add_ledger_entry(data: dict, user_id: int = Depends(get_current_user_id)):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO friend_ledger (friend_name, amount, type, description, date, expected_return_date, status)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO friend_ledger (user_id, friend_name, amount, type, description, date, expected_return_date, status)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
     """, (
+        user_id,
         data["friend_name"],
         data["amount"],
         data["type"],
@@ -94,31 +99,37 @@ async def add_ledger_entry(data: dict):
     return {"id": entry_id, "message": "Ledger entry added successfully."}
 
 @router.get("/ledger/records")
-async def get_ledger_records():
+async def get_ledger_records(user_id: int = Depends(get_current_user_id)):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM friend_ledger ORDER BY date DESC")
+    cursor.execute("SELECT * FROM friend_ledger WHERE user_id = %s ORDER BY date DESC", (user_id,))
     rows = cursor.fetchall()
     cursor.close()
     conn.close()
     return {"records": [dict(row) for row in rows]}
 
 @router.patch("/ledger/settle/{entry_id}")
-async def settle_entry(entry_id: int):
+async def settle_entry(entry_id: int, user_id: int = Depends(get_current_user_id)):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE friend_ledger SET status = 'settled' WHERE id = %s", (entry_id,))
+    cursor.execute("UPDATE friend_ledger SET status = 'settled' WHERE id = %s AND user_id = %s RETURNING id", (entry_id, user_id))
+    settled = cursor.fetchone()
     conn.commit()
     cursor.close()
     conn.close()
+    if not settled:
+        raise HTTPException(status_code=404, detail="Ledger entry not found or unauthorized")
     return {"message": "Entry marked as settled."}
 
 @router.delete("/ledger/delete/{entry_id}")
-async def delete_entry(entry_id: int):
+async def delete_entry(entry_id: int, user_id: int = Depends(get_current_user_id)):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM friend_ledger WHERE id = %s", (entry_id,))
+    cursor.execute("DELETE FROM friend_ledger WHERE id = %s AND user_id = %s RETURNING id", (entry_id, user_id))
+    deleted = cursor.fetchone()
     conn.commit()
     cursor.close()
     conn.close()
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Ledger entry not found or unauthorized")
     return {"message": "Entry deleted."}

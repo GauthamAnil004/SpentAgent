@@ -18,19 +18,7 @@ def init_db():
         conn = get_connection()
         cursor = conn.cursor()
 
-        # Personal expenses table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS personal_expenses (
-                id SERIAL PRIMARY KEY,
-                amount DOUBLE PRECISION NOT NULL,
-                category VARCHAR(255) NOT NULL,
-                description TEXT,
-                date VARCHAR(50) NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-
-        # Users table
+        # Users table (must exist before child tables that reference users.id)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -53,10 +41,26 @@ def init_db():
             );
         """)
 
+        # Personal expenses table
+        cursor.execute("DROP TABLE IF EXISTS personal_expenses CASCADE;")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS personal_expenses (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                amount DOUBLE PRECISION NOT NULL,
+                category VARCHAR(255) NOT NULL,
+                description TEXT,
+                date VARCHAR(50) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         # Friend ledger table
+        cursor.execute("DROP TABLE IF EXISTS friend_ledger CASCADE;")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS friend_ledger (
                 id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 friend_name VARCHAR(255) NOT NULL,
                 amount DOUBLE PRECISION NOT NULL,
                 type VARCHAR(50) NOT NULL,

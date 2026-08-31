@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel, EmailStr
 from passlib.context import CryptContext
 from jose import jwt, JWTError
@@ -16,6 +16,40 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "spendagent_jwt_2026_xK9mP3qR7vL")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 24 * 60
+
+def get_current_user_id(authorization: str = Header(None)) -> int:
+    """
+    Reusable FastAPI dependency that extracts and validates the JWT from
+    the Authorization header, decodes the user's email, and returns the user's id.
+    Raises HTTPException(401) if missing, invalid, or user not found.
+    """
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header missing")
+
+    parts = authorization.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Invalid Authorization header format. Expected 'Bearer <token>'")
+
+    token = parts[1]
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if not email:
+            raise HTTPException(status_code=401, detail="Invalid token payload: missing user email")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
+    user = cursor.fetchone()
+    cursor.close()
+    conn.close()
+
+    if not user:
+        raise HTTPException(status_code=401, detail="Authenticated user not found")
+
+    return user["id"]
 
 class RegisterRequest(BaseModel):
     name: str
