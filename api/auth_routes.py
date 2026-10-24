@@ -1,55 +1,25 @@
-from fastapi import APIRouter, HTTPException, Depends, Header
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr
-from passlib.context import CryptContext
 from jose import jwt, JWTError
 import os
-import traceback
+import hashlib
+import bcrypt
+import sqlite3
 from datetime import datetime, timedelta, timezone
 import random
 import string
+import aiosmtplib
+from email.message import EmailMessage
 from db.database import get_connection
 
-RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 router = APIRouter(tags=["auth"])
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "spendagent_jwt_2026_xK9mP3qR7vL")
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 24 * 60
 
-def get_current_user_id(authorization: str = Header(None)) -> int:
-    """
-    Reusable FastAPI dependency that extracts and validates the JWT from
-    the Authorization header, decodes the user's email, and returns the user's id.
-    Raises HTTPException(401) if missing, invalid, or user not found.
-    """
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Authorization header missing")
-
-    parts = authorization.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(status_code=401, detail="Invalid Authorization header format. Expected 'Bearer <token>'")
-
-    token = parts[1]
-    try:
-        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if not email:
-            raise HTTPException(status_code=401, detail="Invalid token payload: missing user email")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
-    user = cursor.fetchone()
-    cursor.close()
-    conn.close()
-
-    if not user:
-        raise HTTPException(status_code=401, detail="Authenticated user not found")
-
-    return user["id"]
+GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS")
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 
 class RegisterRequest(BaseModel):
     name: str
@@ -71,152 +41,153 @@ class ResetPasswordRequest(BaseModel):
     reset_token: str
     new_password: str
 
+
+def _sha256_hash(password: str) -> bytes:
+    """Pre-hash password with SHA256 to avoid bcrypt 72-byte limit on Python 3.14."""
+    return hashlib.sha256(password.encode("utf-8")).digest()
+
+
 def get_password_hash(password: str) -> str:
-    import hashlib, bcrypt
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-    hashed = bcrypt.hashpw(password_hash.encode(), bcrypt.gensalt())
-    return hashed.decode()
+    """Hash password: SHA256 first, then bcrypt. Safe on Python 3.14."""
+    sha_bytes = _sha256_hash(password)
+    # bcrypt expects bytes; sha256 digest is always 32 bytes (well under 72)
+    hashed = bcrypt.hashpw(sha_bytes, bcrypt.gensalt())
+    return hashed.decode("utf-8")
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    import hashlib, bcrypt
-    password_hash = hashlib.sha256(plain_password.encode()).hexdigest()
-    return bcrypt.checkpw(password_hash.encode(), hashed_password.encode())
+    """Verify password against stored hash."""
+    sha_bytes = _sha256_hash(plain_password)
+    return bcrypt.checkpw(sha_bytes, hashed_password.encode("utf-8"))
 
-def create_access_token(data: dict, expires_delta: timedelta = None):
+
+def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
     to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
 
 @router.post("/auth/register")
 def register(req: RegisterRequest):
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM users WHERE email = %s", (req.email,))
-        if cursor.fetchone():
-            cursor.close()
-            conn.close()
-            raise HTTPException(status_code=400, detail="Email already registered")
-        hashed_password = get_password_hash(req.password)
-        cursor.execute(
-            "INSERT INTO users (name, email, password_hash) VALUES (%s, %s, %s)",
-            (req.name, req.email, hashed_password)
-        )
-        conn.commit()
-        cursor.close()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM users WHERE email = ?", (req.email,))
+    if cursor.fetchone():
         conn.close()
-        return {"message": "Account created successfully"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"{str(e)} | {traceback.format_exc()}")
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    hashed_password = get_password_hash(req.password)
+    cursor.execute(
+        "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)",
+        (req.name, req.email, hashed_password)
+    )
+    conn.commit()
+    conn.close()
+    return {"message": "Account created successfully"}
+
 
 @router.post("/auth/login")
 def login(req: LoginRequest):
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT name, email, password_hash FROM users WHERE email = %s", (req.email,))
-        user = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        if not user or not verify_password(req.password, user["password_hash"]):
-            raise HTTPException(status_code=401, detail="Invalid email or password")
-        access_token = create_access_token(
-            data={"sub": user["email"], "name": user["name"]},
-            expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        )
-        return {"access_token": access_token, "token_type": "bearer", "name": user["name"]}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"{str(e)} | {traceback.format_exc()}")
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT name, email, password_hash FROM users WHERE email = ?", (req.email,))
+    user = cursor.fetchone()
+    conn.close()
+
+    if not user or not verify_password(req.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user["email"], "name": user["name"]}, expires_delta=access_token_expires
+    )
+
+    return {"access_token": access_token, "token_type": "bearer", "name": user["name"]}
+
 
 async def send_otp_email(email: str, otp: str):
-    api_key = os.getenv("RESEND_API_KEY") or RESEND_API_KEY
-    print(f"DEBUG: RESEND_API_KEY is set: {bool(api_key)}, length: {len(api_key) if api_key else 0}")
-    if not api_key:
-        print("Warning: RESEND_API_KEY not set. OTP:", otp)
+    if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
+        print("Warning: SMTP credentials not set. OTP generated:", otp)
         return
-    import httpx
+
+    message = EmailMessage()
+    message["From"] = GMAIL_ADDRESS
+    message["To"] = email
+    message["Subject"] = "SpendAgent - Your OTP Code"
+    message.set_content(f"Your OTP is: {otp}. Valid for 10 minutes.")
+
     try:
-        print(f"DEBUG: Attempting to send email to {email} via Resend")
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://api.resend.com/emails",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "from": "SpendAgent <onboarding@resend.dev>",
-                    "to": [email],
-                    "subject": "SpendAgent - Your OTP Code",
-                    "text": f"Your OTP is: {otp}. Valid for 10 minutes.",
-                },
-            )
-            print(f"DEBUG: Resend response status: {response.status_code}, body: {response.text}")
-            if response.status_code >= 400:
-                print(f"Failed to send email: {response.status_code} {response.text}")
+        await aiosmtplib.send(
+            message,
+            hostname="smtp.gmail.com",
+            port=465,
+            use_tls=True,
+            username=GMAIL_ADDRESS,
+            password=GMAIL_APP_PASSWORD,
+        )
     except Exception as e:
-        print(f"Failed to send email: {e} | {traceback.format_exc()}")
+        print(f"Failed to send email: {e}")
+
 
 @router.post("/auth/forgot-password")
 async def forgot_password(req: ForgotPasswordRequest):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id FROM users WHERE email = %s", (req.email,))
+    cursor.execute("SELECT id FROM users WHERE email = ?", (req.email,))
     if not cursor.fetchone():
-        cursor.close()
         conn.close()
         raise HTTPException(status_code=404, detail="User not found")
-    otp = "".join(random.choices(string.digits, k=6))
+
+    otp = ''.join(random.choices(string.digits, k=6))
     expiry = datetime.now() + timedelta(minutes=10)
+
     cursor.execute(
-        "INSERT INTO otps (email, otp_code, expiry) VALUES (%s, %s, %s)",
-        (req.email, otp, expiry)
+        "INSERT INTO otps (email, otp_code, expiry) VALUES (?, ?, ?)",
+        (req.email, otp, expiry.strftime("%Y-%m-%d %H:%M:%S"))
     )
     conn.commit()
-    cursor.close()
     conn.close()
+
     await send_otp_email(req.email, otp)
+
     return {"message": "OTP sent to your email"}
+
 
 @router.post("/auth/verify-otp")
 def verify_otp(req: VerifyOtpRequest):
     conn = get_connection()
     cursor = conn.cursor()
+
     cursor.execute(
-        "SELECT id, expiry FROM otps WHERE email = %s AND otp_code = %s AND used = 0 ORDER BY created_at DESC LIMIT 1",
+        "SELECT id, expiry FROM otps WHERE email = ? AND otp_code = ? AND used = 0 ORDER BY created_at DESC LIMIT 1",
         (req.email, req.otp)
     )
     otp_record = cursor.fetchone()
+
     if not otp_record:
-        cursor.close()
         conn.close()
         raise HTTPException(status_code=400, detail="Invalid OTP")
-    
-    expiry_val = otp_record["expiry"]
-    if isinstance(expiry_val, str):
-        expiry_time = datetime.strptime(expiry_val, "%Y-%m-%d %H:%M:%S")
-    else:
-        expiry_time = expiry_val
 
-    current_time = datetime.now(expiry_time.tzinfo) if getattr(expiry_time, "tzinfo", None) else datetime.now()
-    if current_time > expiry_time:
-        cursor.close()
+    expiry_time = datetime.strptime(otp_record["expiry"], "%Y-%m-%d %H:%M:%S")
+    if datetime.now() > expiry_time:
         conn.close()
         raise HTTPException(status_code=400, detail="OTP expired")
-    
-    cursor.execute("UPDATE otps SET used = 1 WHERE id = %s", (otp_record["id"],))
+
+    cursor.execute("UPDATE otps SET used = 1 WHERE id = ?", (otp_record["id"],))
     conn.commit()
-    cursor.close()
     conn.close()
+
     reset_token = create_access_token(
         data={"sub": req.email, "type": "reset"}, expires_delta=timedelta(minutes=15)
     )
+
     return {"message": "OTP verified", "reset_token": reset_token}
+
 
 @router.post("/auth/reset-password")
 def reset_password(req: ResetPasswordRequest):
@@ -228,11 +199,13 @@ def reset_password(req: ResetPasswordRequest):
             raise HTTPException(status_code=401, detail="Invalid token")
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
     hashed_password = get_password_hash(req.new_password)
+
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE users SET password_hash = %s WHERE email = %s", (hashed_password, email))
+    cursor.execute("UPDATE users SET password_hash = ? WHERE email = ?", (hashed_password, email))
     conn.commit()
-    cursor.close()
     conn.close()
+
     return {"message": "Password reset successfully"}
